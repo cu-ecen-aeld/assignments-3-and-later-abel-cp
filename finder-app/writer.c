@@ -16,7 +16,7 @@
 int writer(const char *writefile, const char *writestr)
 {
   int fd;
-  fd = open(writefile, O_WRONLY | O_CREAT);
+  fd = open(writefile, O_WRONLY |O_TRUNC | O_CREAT, 0644);
   if (fd == -1) {
     perror("can not open file");
     return 1;

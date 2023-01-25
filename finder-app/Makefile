@@ -1,8 +1,10 @@
+# CROSS_COMPILE := /opt/gcc-arm-10.2-2020.11-x86_64-aarch64-none-linux-gnu/bin/aarch64-none-linux-gnu-
+CC := $(CROSS_COMPILE)gcc
 writer: writer.o
-	cc writer.o -o writer
+	$(CC) writer.o -o writer
 
 writer.o: writer.c
-	cc -c writer.c -o writer.o
+	$(CC) -c writer.c -o writer.o
 
 clean:
 	rm *.o writer
