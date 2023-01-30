@@ -11,7 +11,7 @@ if [ -z "${OUTDIR}" ]; then
     echo "No outdir specified, using ${OUTDIR}"
 fi
 
-KERNEL_IMAGE=${OUTDIR}/vmlinux
+KERNEL_IMAGE=${OUTDIR}/Image
 INITRD_IMAGE=${OUTDIR}/initramfs.cpio.gz
 
 if [ ! -e ${KERNEL_IMAGE} ]; then
