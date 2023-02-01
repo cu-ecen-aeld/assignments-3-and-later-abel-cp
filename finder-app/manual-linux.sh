@@ -64,6 +64,7 @@ mkdir -p ${OUTDIR}/rootfs/bin \
          ${OUTDIR}/rootfs/dev \
          ${OUTDIR}/rootfs/etc \
          ${OUTDIR}/rootfs/lib \
+         ${OUTDIR}/rootfs/lib64 \
          ${OUTDIR}/rootfs/proc \
          ${OUTDIR}/rootfs/sys \
          ${OUTDIR}/rootfs/sbin \
@@ -91,8 +92,8 @@ else
 fi
 
 # TODO: Make and install busybox
-make ARCH=${ARCH} CORSS_COMPILE=${CROSS_COMPILE}
-make ARCH=${ARCH} CORSS_COMPILE=${CROSS_COMPILE} CONFIG_PREFIX=${OUTDIR}/rootfs install
+make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE}
+make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} CONFIG_PREFIX=${OUTDIR}/rootfs install
 
 echo "Library dependencies"
 
@@ -108,11 +109,19 @@ export SYSROOT=$(${CROSS_COMPILE}gcc -print-sysroot)
 echo $SYSROOT
 # read -p "press [enter] to continue"
 
-cd ${OUTDIR}
-cp -a "$SYSROOT/lib64/ld-2.31.so" lib
-cp -a "$SYSROOT/lib64/libm-2.31.so" lib
-cp -a "$SYSROOT/lib64/libc-2.31.so" lib
-cp -a "$SYSROOT/lib64/libresolv-2.31.so" lib
+cd ${OUTDIR}/rootfs
+cp -a "$SYSROOT/lib/ld-linux-aarch64.so.1" lib
+cp -a "$SYSROOT/lib64/ld-2.31.so" lib64
+#ln -s ld-2.31.so lib/ld-linux-aarch64.so.1
+
+cp -a "$SYSROOT/lib64/libm.so.6" lib64
+cp -a "$SYSROOT/lib64/libm-2.31.so" lib64
+
+cp -a "$SYSROOT/lib64/libc.so.6" lib64
+cp -a "$SYSROOT/lib64/libc-2.31.so" lib64
+
+cp -a "$SYSROOT/lib64/libresolv.so.2" lib64
+cp -a "$SYSROOT/lib64/libresolv-2.31.so" lib64
 
 # TODO: Make device nodes
 sudo mknod -m 666 dev/null c 1 3
@@ -123,17 +132,19 @@ make clean
 make
 # TODO: Copy the finder related scripts and executables to the /home directory
 # on the target rootfs
-cp finder.sh ${OUTDIR}/rootfs/home
-cp conf/username.txt ${OUTDIR}/rootfs/home
-cp finder-test.sh ${OUTDIR}/rootfs/home
-cp autorun-qemu.sh ${OUTDIR}/rootfs/home
+mkdir ${OUTDIR}/rootfs/home/finder-app
+mkdir ${OUTDIR}/rootfs/home/conf
+cp -a conf/* ${OUTDIR}/rootfs/home/conf
+cp -a conf ${OUTDIR}/rootfs/home/finder-app
+cp -a finder.sh ${OUTDIR}/rootfs/home/finder-app
+cp -a finder-test.sh ${OUTDIR}/rootfs/home/finder-app
+cp -a autorun-qemu.sh ${OUTDIR}/rootfs/home/finder-app
 
 # TODO: Chown the root directory
 cd ${OUTDIR}/rootfs
 sudo chown -R root:root *
 
 # TODO: Create initramfs.cpio.gz
-cd ${OUTDIR}
 find . | cpio -H newc -ov --owner root:root > ../initramfs.cpio
 cd ..
 gzip initramfs.cpio
