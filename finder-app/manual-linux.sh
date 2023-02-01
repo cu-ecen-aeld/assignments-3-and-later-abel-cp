@@ -124,8 +124,10 @@ cp -a "$SYSROOT/lib64/libresolv.so.2" lib64
 cp -a "$SYSROOT/lib64/libresolv-2.31.so" lib64
 
 # TODO: Make device nodes
-sudo mknod -m 666 dev/null c 1 3
-sudo mknod -m 600 dev/console c 5 1
+## sudo mknod -m 666 dev/null c 1 3
+## sudo mknod -m 600 dev/console c 5 1
+mknod -m 666 dev/null c 1 3
+mknod -m 600 dev/console c 5 1
 # TODO: Clean and build the writer utility
 cd ${FINDER_APP_DIR} 
 make clean
