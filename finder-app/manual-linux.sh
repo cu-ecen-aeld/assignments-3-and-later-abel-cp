@@ -136,6 +136,7 @@ make
 # on the target rootfs
 mkdir ${OUTDIR}/rootfs/home/finder-app
 mkdir ${OUTDIR}/rootfs/home/conf
+pwd
 cp -a conf/* ${OUTDIR}/rootfs/home/conf
 cp -a conf ${OUTDIR}/rootfs/home/finder-app
 cp -a finder.sh ${OUTDIR}/rootfs/home/finder-app
@@ -146,8 +147,9 @@ cp -a autorun-qemu.sh ${OUTDIR}/rootfs/home/finder-app
 cd ${OUTDIR}/rootfs
 # sudo chown -R root:root *
 chown -R root:root *
+pwd
 
 # TODO: Create initramfs.cpio.gz
 find . | cpio -H newc -ov --owner root:root > ../initramfs.cpio
-cd ..
+cd ${OUTDIR}
 gzip initramfs.cpio
