@@ -147,9 +147,13 @@ cp -a autorun-qemu.sh ${OUTDIR}/rootfs/home/finder-app
 cd ${OUTDIR}/rootfs
 # sudo chown -R root:root *
 chown -R root:root *
+
 pwd
+echo "Create initramfs.cpio"
 
 # TODO: Create initramfs.cpio.gz
-find . | cpio -H newc -ov --owner root:root > ../initramfs.cpio
+find . | cpio -H newc -ov --owner root:root > ${OUTDIR}/initramfs.cpio
 cd ${OUTDIR}
 gzip initramfs.cpio
+ls initramfs*
+
