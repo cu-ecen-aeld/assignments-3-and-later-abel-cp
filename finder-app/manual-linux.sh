@@ -134,14 +134,18 @@ make clean
 make
 # TODO: Copy the finder related scripts and executables to the /home directory
 # on the target rootfs
-mkdir ${OUTDIR}/rootfs/home/finder-app
-mkdir ${OUTDIR}/rootfs/home/conf
-pwd
-cp -a conf/* ${OUTDIR}/rootfs/home/conf
-cp -a conf ${OUTDIR}/rootfs/home/finder-app
-cp -a finder.sh ${OUTDIR}/rootfs/home/finder-app
-cp -a finder-test.sh ${OUTDIR}/rootfs/home/finder-app
-cp -a autorun-qemu.sh ${OUTDIR}/rootfs/home/finder-app
+## mkdir ${OUTDIR}/rootfs/home/finder-app
+## mkdir ${OUTDIR}/rootfs/home/conf
+## pwd
+## cp -a conf/* ${OUTDIR}/rootfs/home/conf
+## cp -a conf ${OUTDIR}/rootfs/home/finder-app
+## cp -a finder.sh ${OUTDIR}/rootfs/home/finder-app
+## cp -a finder-test.sh ${OUTDIR}/rootfs/home/finder-app
+## cp -a autorun-qemu.sh ${OUTDIR}/rootfs/home/finder-app
+cp -a conf ${OUTDIR}/rootfs/home/
+cp -a finder.sh ${OUTDIR}/rootfs/home/
+cp -a finder-test.sh ${OUTDIR}/rootfs/home/
+cp -a autorun-qemu.sh ${OUTDIR}/rootfs/home/
 
 # TODO: Chown the root directory
 cd ${OUTDIR}/rootfs
@@ -154,6 +158,6 @@ echo "Create initramfs.cpio"
 # TODO: Create initramfs.cpio.gz
 find . | cpio -H newc -ov --owner root:root > ${OUTDIR}/initramfs.cpio
 cd ${OUTDIR}
-gzip initramfs.cpio
+gzip -f initramfs.cpio
 ls initramfs*
 
