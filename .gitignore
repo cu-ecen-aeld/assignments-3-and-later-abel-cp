@@ -5,4 +5,4 @@ build/
 crosstool-ng
 aesd-build
 .vscode/
-test.sh.log
+*.log
