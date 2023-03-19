@@ -4,6 +4,8 @@ CC := $(CROSS_COMPILE)gcc
 OBJ_FILES := writer.o
 writer: writer.c
 	$(CC) writer.c -o writer
+.PHONY: all clean
+all: writer
 
 clean:
 	rm -rf writer
