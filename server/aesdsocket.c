@@ -37,8 +37,11 @@
 #include <string.h>    // memset
 #include <stdlib.h>    // exit
 #include <errno.h>
+#include <fcntl.h>
 #include <unistd.h>
 #include <sys/wait.h>
+#include <syslog.h>
+
 
 void showipinfo(const struct addrinfo *p)
 {
@@ -109,51 +112,35 @@ void *get_in_addr(struct sockaddr *sa)
     return &(((struct sockaddr_in6*)sa)->sin6_addr);
 }
 
-
-int main()
-{
-
-  // for the server, we use
-  // socket(int domain, int type, int protocol) to create a socket fd
-  // then bind sfd with address.. but we don't know the ip of the machine
-  // so getaddrinfo comes to the rescue.
+/*
+  would need an argument for PORT, 
+  but the assignment has port fixe at 9000, so skip the argument for now
+  return -1 if fail else return file descriptor
   
+ */
+int get_listener_fd()
+{
+  /* getaddrinfo; */
   int status;
   struct addrinfo hints;
   struct addrinfo *servinfo;  // will point to the results
-  socklen_t addr_size;
-  struct sockaddr_storage peer_addr;
-  char hostname[256];
-  struct sigaction sa;
-  char peerhostname[INET6_ADDRSTRLEN];
 
-  
-  gethostname(hostname, sizeof(hostname));
-  printf("%s\n", hostname);
-  
   memset(&hints, 0, sizeof hints); // make sure the struct is empty
   hints.ai_family = AF_UNSPEC;     // don't care IPv4 or IPv6
   hints.ai_socktype = SOCK_STREAM; // TCP stream sockets
   hints.ai_flags = AI_PASSIVE;     // fill in my IP for me
 
   // port is the service we are providing so we know that
-  if ((status = getaddrinfo(NULL, "3010", &hints, &servinfo)) != 0) {
-    fprintf(stderr, "getaddrinfo error: %s\n", gai_strerror(status));
+  if ((status = getaddrinfo(NULL, "9000", &hints, &servinfo)) != 0) {
+    /* fprintf(stderr, "getaddrinfo error: %s\n", gai_strerror(status)); */
+    perror("getaddrinfo error");
     exit(1);
   }
 
-  // servinfo now points to a linked list of 1 or more struct addrinfos
-  // ... do everything until you don't need servinfo anymore ....
-  // if more than 1 addrinfos which one to use?
-  walkaddrinfo(servinfo);
-
-  printf("getting socket file descriptor\n");
-  
-  // create a socket has nothing to do with servinfo 
-  int sfd, afd;
+  /* go through the addrinfo list and try to get a socket descriptor */
+  int sfd;
   struct addrinfo *p;
   int yes = 1;
-
   for (p = servinfo; p != NULL; p = p->ai_next)
     {
       // create a socket
@@ -161,16 +148,16 @@ int main()
       if (sfd == -1) // error
 	{
 	  perror("socket error");
-	  continue;
+	  continue; // try next addr
 	}
       
-      if (setsockopt(sfd, SOL_SOCKET, SO_REUSEADDR, &yes,
-		     sizeof(int)) == -1) {
-	perror("setsockopt");
-	close(sfd);
-	freeaddrinfo(servinfo);
-	exit(1);
-      }
+      if (setsockopt(sfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) 
+	{
+	  perror("setsockopt");
+	  close(sfd);
+	  freeaddrinfo(servinfo);
+	  exit(1);
+	}
       
       if (trytobind(sfd, p) == -1)
 	{
@@ -190,32 +177,174 @@ int main()
       fprintf(stderr, "server: failed to bind\n");
       exit(1);
     }
-   
-  // listen
-  printf("listening\n");
+
+  /* return */
+  return sfd;
+}
+
+// res is the length of substr that ends with c or limit if c not found
+int scanfor(char *buf, char c, size_t limit, size_t *res)
+{
+  size_t pos = 0;
+  char *p;
   
+  for (p = buf, pos = 0; *p != c && pos < limit; p++, pos++);
+
+  if (*p == c)
+    {
+      *res = pos+1;
+      return 0;
+    }
+  return -1;
+}
+
+
+int service(int fd, int logfd)
+{
+  char *msgbuffer;  // buffer for message store
+  char *recvbuf;  // buffer for message store
+  char *wptr, *rptr;
+  size_t msgbuffer_size = 8192;
+  size_t recvbuf_size = 2048;
+  size_t nbytes, messagesize, freespace;
+
+  // allocate msg buffer
+  msgbuffer = malloc(msgbuffer_size);
+  if (msgbuffer == NULL)
+    {
+      perror("malloc error 1");
+      exit(1);
+    }
+
+  recvbuf = malloc(recvbuf_size);
+  if (recvbuf == NULL)
+    {
+      perror("malloc error 2");
+      exit(1);
+    }
+  
+  messagesize = 0;
+  wptr = msgbuffer;
+  freespace = msgbuffer_size;
+  
+  // the loop of receiving
+  while(1)
+    {
+      // try to receive upto 2048 bytes,
+      nbytes = recv(fd, recvbuf, recvbuf_size-1, 0);
+      if (nbytes < 0) 
+	{
+	  // recv failed
+	  perror("recv error");
+	  break;
+	}
+      if (nbytes == 0)
+	{
+	  // connection closed
+	  break;
+	}
+
+      // now nbytes in recvbuf
+      // scan received buffer for a pattern, upto nbytes
+      size_t position;
+      size_t messagecomplete = 0;
+      int res;
+      res = scanfor(recvbuf, '\n', nbytes, &position);
+      if (res == 0)
+	{
+	  // pattern found
+	  messagecomplete = 1;
+	}
+      // append message to messagebuffer
+      memcpy(wptr, recvbuf, position);
+      messagesize += position;
+      // update wptr
+      wptr += position;
+      freespace -= position;
+
+      // double buffer size if freespace < recvbuf_size
+      if (freespace < recvbuf_size)
+	{
+	  msgbuffer_size *= 2;
+	  if (realloc(msgbuffer, msgbuffer_size) == NULL)
+	    {
+	      perror("realloc msgbuffer error");
+	      free(msgbuffer);
+	      break; // exit loop
+	    }
+	  // update freespace
+	  freespace = msgbuffer_size - messagesize;
+	}
+      // write message buffer to logfd
+      if (messagecomplete)
+	{
+	  if (write(logfd, msgbuffer, messagesize) == -1)
+	    {
+	      perror("realloc msgbuffer error");
+	      free(msgbuffer);
+	      break;
+	    }
+	  // clear message buffer
+	  messagesize = 0;
+	  wptr = msgbuffer;
+	}
+    }
+  
+  free(recvbuf);
+  free(msgbuffer);
+    
+  return 0;
+}
+
+
+int server()
+{
+  // get a socket for listenning 
+  int sfd = get_listener_fd();
+
+  // listen
   if (listen(sfd, 10) != 0)
     {
       perror("listen error");
     }
 
+
+  // open log file 
+  int logfd = open("/var/tmp/aesdsocketdata", O_RDWR|O_CREAT, S_IRWXU|S_IRGRP|S_IXGRP|S_IROTH|S_IXOTH);
+  if (logfd == -1) 
+    {
+      perror("open error");
+      close(sfd);
+      exit(1);
+    }
+
+  openlog(NULL, LOG_PID|LOG_PERROR, LOG_USER);
+
   // sigaction
+  struct sigaction sa;
   sa.sa_handler = sigchld_handler; // reap all dead processes
   sigemptyset(&sa.sa_mask);
   sa.sa_flags = SA_RESTART;
   if (sigaction(SIGCHLD, &sa, NULL) == -1) {
     perror("sigaction");
+    close(sfd);
+    close(logfd);
+    closelog();
     exit(1);
   }
-
+  
   // accept loop
+  int afd;
+  socklen_t addr_size;
+  struct sockaddr_storage peer_addr;
+  char peerhostname[INET6_ADDRSTRLEN];
   while(1)
     {
       addr_size = sizeof peer_addr;
       afd = accept(sfd, (struct sockaddr *) &peer_addr, &addr_size);
       if (afd == -1)
 	{
-	  perror("accept ---");
+	  perror("accept error");
 	  continue;
 	}
 
@@ -223,26 +352,42 @@ int main()
 		get_in_addr((struct sockaddr *) &peer_addr),
 		peerhostname,
 		sizeof(peerhostname));
-      printf("server: got a connection form %s \n", peerhostname);
+      syslog(LOG_DEBUG, "server: got a connection form %s \n", peerhostname);
 
 
       // fork a child
-      if (!fork()) // fork return 0 in child process
+      pid_t pid, sid;
+      pid = fork();
+      if (pid < 0)
+	{ // fail
+	  close(afd);
+	  exit(EXIT_FAILURE);
+	}
+
+      if (pid == 0) // fork return 0 in child process
 	{
 	  close(sfd); // child does not need to listen
-	  if(send(afd, "Hello from abel", 15, 0) == -1)
-	    {
-	      perror("send");
-	    }
-
+	  /* if(send(afd, "Hello from abel", 15, 0) == -1) */
+	  /*   { */
+	  /*     perror("send"); */
+	  /*   } */
+	  service(afd, logfd);
 	  // child process finished here
 	  close(afd);
 	  exit(0);
 	}
+
       close(afd);  //parent process does not need this
     }
   
   // close
   close(sfd);
+  close(logfd);
   return 0;
+}
+
+
+int main()
+{
+  return server();
 }
