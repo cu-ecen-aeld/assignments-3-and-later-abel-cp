@@ -98,7 +98,7 @@ void sigchld_handler()
     int saved_errno = errno;
 
     while(waitpid(-1, NULL, WNOHANG) > 0);
-
+    syslog(LOG_DEBUG, "sigchld_handler");
     errno = saved_errno;
 }
 
@@ -183,38 +183,79 @@ int get_listener_fd()
 }
 
 // res is the length of substr that ends with c or limit if c not found
-int scanfor(char *buf, char c, size_t limit, size_t *res)
+int scanfor(char *buf, char c, size_t limit, size_t *pos)
 {
-  size_t pos = 0;
-  char *p;
-  
-  for (p = buf, pos = 0; *p != c && pos < limit; p++, pos++);
+  int res = 0;
+  size_t index = 0;
 
-  if (*p == c)
+  for (; *buf != c && index < limit; buf++, index++);
+  *pos = index;
+  
+  if (*buf == c)
     {
-      *res = pos+1;
-      return 0;
+      res =  0;
     }
-  return -1;
+
+  if (*pos == limit)
+    {
+      res = 1;
+    }
+  syslog(LOG_DEBUG, "*buf = %02x, index = %ld, return value = %d", *buf, index, res);
+  return res;
+}
+
+/* send all message in logfd, though fd */
+int send_all(int fd, int logfd, char *buf, size_t buf_size)
+{
+  // read from logfd
+  size_t bytesread=1;
+
+  lseek(logfd, 0, SEEK_SET);
+  while (bytesread > 0)
+    {
+      bytesread = read(logfd, buf, buf_size);
+      if (bytesread==-1)
+	{
+	  perror("read error");
+	  syslog(LOG_DEBUG, "error in reading data log");
+	  return -1;
+	}
+      if (bytesread == 0)
+	return 0;
+
+      syslog(LOG_DEBUG,"sending %ld bytes back to client", bytesread);
+      if(send(fd, buf, bytesread, 0) == -1)
+	{
+	  perror("send error");
+	  syslog(LOG_DEBUG, "error sending data back");
+	}
+    }
 }
 
 
-int service(int fd, int logfd)
+int service(int fd, int logfd, int logfd2)
 {
-  char *msgbuffer;  // buffer for message store
-  char *recvbuf;  // buffer for message store
+  //  char *msgbuffer;  // buffer for message store
+  char *recvbuf;  // receiving buffer
+  char *sendbuf;  // sending buffer
   char *wptr, *rptr;
-  size_t msgbuffer_size = 8192;
+  //  size_t msgbuffer_size = 8192;
   size_t recvbuf_size = 2048;
+  size_t sendbuf_size = 2048;
   size_t nbytes, messagesize, freespace;
 
+  size_t position;
+  size_t messagecomplete = 0;
+  int res;
+
   // allocate msg buffer
-  msgbuffer = malloc(msgbuffer_size);
-  if (msgbuffer == NULL)
-    {
-      perror("malloc error 1");
-      exit(1);
-    }
+  /* msgbuffer = malloc(msgbuffer_size); */
+  /* if (msgbuffer == NULL) */
+  /*   { */
+  /*     perror("malloc error 1"); */
+  /*     exit(1); */
+  /*   } */
+  /* syslog(LOG_DEBUG, "msgbuffer pointer = %p", msgbuffer); */
 
   recvbuf = malloc(recvbuf_size);
   if (recvbuf == NULL)
@@ -222,16 +263,27 @@ int service(int fd, int logfd)
       perror("malloc error 2");
       exit(1);
     }
+  syslog(LOG_DEBUG, "recvbuf pointer = %p", recvbuf);
   
-  messagesize = 0;
-  wptr = msgbuffer;
-  freespace = msgbuffer_size;
+  sendbuf = malloc(sendbuf_size);
+  if (recvbuf == NULL)
+    {
+      perror("malloc error 3");
+      exit(1);
+    }
+  syslog(LOG_DEBUG, "sendbuf pointer = %p", sendbuf);
+  
+  /* messagesize = 0; */
+  /* wptr = msgbuffer; */
+  /* freespace = msgbuffer_size; */
   
   // the loop of receiving
   while(1)
     {
       // try to receive upto 2048 bytes,
-      nbytes = recv(fd, recvbuf, recvbuf_size-1, 0);
+      nbytes = recv(fd, recvbuf, recvbuf_size, 0);
+      syslog(LOG_DEBUG, "recv returned %ld bytes", nbytes);
+      
       if (nbytes < 0) 
 	{
 	  // recv failed
@@ -241,59 +293,126 @@ int service(int fd, int logfd)
       if (nbytes == 0)
 	{
 	  // connection closed
+	  syslog(LOG_DEBUG, "-- connection closed");
 	  break;
 	}
 
+      // write to logfd2
+      // syslog(LOG_DEBUG,"write recvbuf to my log file");
+      /* if (write(logfd2, recvbuf, nbytes) == -1) */
+      /* 	{ */
+      /* 	  perror("write logfd2 error"); */
+      /* 	  syslog(LOG_DEBUG,"write recvbuf to my log file ERROR"); */
+      /* 	  break; */
+      /* 	} */
+
       // now nbytes in recvbuf
       // scan received buffer for a pattern, upto nbytes
-      size_t position;
-      size_t messagecomplete = 0;
-      int res;
       res = scanfor(recvbuf, '\n', nbytes, &position);
       if (res == 0)
 	{
-	  // pattern found
-	  messagecomplete = 1;
+	  position++;
 	}
+      // syslog(LOG_DEBUG,"nbytes = %ld, res = %d, position = %ld, messagesize = %ld, freespace = %ld", nbytes,res, position, messagesize, freespace);
       // append message to messagebuffer
-      memcpy(wptr, recvbuf, position);
-      messagesize += position;
+      /* memcpy(wptr, recvbuf, position); */
+      /* messagesize += position; */
       // update wptr
-      wptr += position;
-      freespace -= position;
-
+      /* wptr += position; */
+      /* freespace -= position; */
+      // syslog(LOG_DEBUG,"after memcpy, nbytes = %ld, res = %d, position = %ld, messagesize = %ld, freespace = %ld", nbytes,res, position, messagesize, freespace);
       // double buffer size if freespace < recvbuf_size
-      if (freespace < recvbuf_size)
-	{
-	  msgbuffer_size *= 2;
-	  if (realloc(msgbuffer, msgbuffer_size) == NULL)
-	    {
-	      perror("realloc msgbuffer error");
-	      free(msgbuffer);
-	      break; // exit loop
-	    }
-	  // update freespace
-	  freespace = msgbuffer_size - messagesize;
-	}
+      /* if (freespace <= recvbuf_size) */
+      /* 	{ */
+      /* 	  msgbuffer_size *= 2; */
+      /* 	  syslog(LOG_DEBUG, "freespace = %ld, calling realloc with new buffer size = %ld", freespace, msgbuffer_size); */
+	  
+      /* 	  msgbuffer = (char *)realloc((void *)msgbuffer, msgbuffer_size); */
+      /* 	  if (msgbuffer  == NULL) */
+      /* 	    { */
+      /* 	      syslog(LOG_DEBUG, "realloc msgbuffer error!!"); */
+      /* 	      perror("realloc msgbuffer error"); */
+      /* 	      break; // exit loop */
+      /* 	    } */
+
+      /* 	  syslog(LOG_DEBUG, "new pointer = %p", msgbuffer); */
+      /* 	  // update freespace */
+      /* 	  freespace = msgbuffer_size - messagesize; */
+      /* 	  // syslog(LOG_DEBUG, "new freespace = %ld", freespace); */
+
+      /* 	} */
       // write message buffer to logfd
-      if (messagecomplete)
+      syslog(LOG_DEBUG, "write %ld bytes to file", position);
+      if (write(logfd, recvbuf, position) == -1)
 	{
-	  if (write(logfd, msgbuffer, messagesize) == -1)
-	    {
-	      perror("realloc msgbuffer error");
-	      free(msgbuffer);
-	      break;
-	    }
+	  perror("write message to file error");
+	  syslog(LOG_DEBUG,"write message to file error");
+	  break;
+	}
+
+      if (res == 0)
+	{
+	  // syslog(LOG_DEBUG, "write %ld bytes to file", messagesize);
+	  /* syslog(LOG_DEBUG, "write %ld bytes to file", position); */
+	  /* if (write(logfd, recvbuf, position) == -1) */
+	  /*   { */
+	  /*     perror("write message to file error"); */
+	  /*     syslog(LOG_DEBUG,"write message to file error"); */
+	  /*     break; */
+	  /*   } */
+	  /* if (write(logfd, msgbuffer, messagesize) == -1) */
+	  /*   { */
+	  /*     perror("write message to file error"); */
+	  /*     syslog(LOG_DEBUG,"write message to file error"); */
+	  /*     break; */
+	  /*   } */
 	  // clear message buffer
-	  messagesize = 0;
-	  wptr = msgbuffer;
+	  /* messagesize = 0; */
+	  /* wptr = msgbuffer; */
+
+	  // copy anything after pattern to msgbuffer;
+	  /* if (position < nbytes-1) */
+	  /*   { */
+	  /*     memcpy(wptr, recvbuf+position, nbytes-1-position); */
+	  /*     wptr += nbytes-1-position; */
+	  /*   } */
+	  // send all received message back
+	  if (send_all(fd, logfd, sendbuf, sendbuf_size) == -1)
+	    {
+	      //break;
+	    }
+	  // write the rest
+	  if (position < nbytes)
+	    {
+	      if (write(logfd, recvbuf+position, nbytes-position) == -1)
+		{
+		  perror("write message to file error");
+		  syslog(LOG_DEBUG,"write message to file error");
+		  break;
+		}
+	    }
 	}
     }
   
-  free(recvbuf);
-  free(msgbuffer);
-    
-  return 0;
+  syslog(LOG_DEBUG, "remving aesdsocketdata file");
+  unlink("/var/tmp/aesdsocketdata");
+  if (sendbuf != NULL)
+    {
+      syslog(LOG_DEBUG, "freeing sendbuf %p ", sendbuf);
+      free(sendbuf);
+    }
+  if (recvbuf != NULL)
+    {
+      syslog(LOG_DEBUG, "freeing recvbuf %p ", recvbuf);
+      free(recvbuf);
+    }
+  /* if (msgbuffer != NULL) */
+  /*   { */
+  /*     syslog(LOG_DEBUG, "freeing msgbuffer %p", msgbuffer); */
+  /*     free(msgbuffer); */
+  /*   } */
+  
+  return nbytes;
 }
 
 
@@ -318,6 +437,14 @@ int server()
       exit(1);
     }
 
+  int logfd2 = open("/var/tmp/mylog", O_RDWR|O_CREAT, S_IRWXU|S_IRGRP|S_IXGRP|S_IROTH|S_IXOTH);
+  if (logfd2 == -1) 
+    {
+      perror("open error");
+      close(sfd);
+      exit(1);
+    }
+
   openlog(NULL, LOG_PID|LOG_PERROR, LOG_USER);
 
   // sigaction
@@ -327,9 +454,13 @@ int server()
   sa.sa_flags = SA_RESTART;
   if (sigaction(SIGCHLD, &sa, NULL) == -1) {
     perror("sigaction");
+    syslog(LOG_DEBUG, "Caught signal, existing");
     close(sfd);
     close(logfd);
+    close(logfd2);
     closelog();
+    unlink("/var/tmp/aesdsocketdata");
+    unlink("/var/tmp/mylog");
     exit(1);
   }
   
@@ -352,7 +483,7 @@ int server()
 		get_in_addr((struct sockaddr *) &peer_addr),
 		peerhostname,
 		sizeof(peerhostname));
-      syslog(LOG_DEBUG, "server: got a connection form %s \n", peerhostname);
+      syslog(LOG_DEBUG, "Accepted connection form %s \n", peerhostname);
 
 
       // fork a child
@@ -366,12 +497,19 @@ int server()
 
       if (pid == 0) // fork return 0 in child process
 	{
+	  size_t n;
 	  close(sfd); // child does not need to listen
-	  /* if(send(afd, "Hello from abel", 15, 0) == -1) */
-	  /*   { */
-	  /*     perror("send"); */
-	  /*   } */
-	  service(afd, logfd);
+
+	  n = service(afd, logfd, logfd2);
+	  syslog(LOG_DEBUG, "service returned value = %ld\n", n);
+	  if(n == 0)
+	    {
+	      syslog(LOG_DEBUG, "Closed connection form %s \n", peerhostname);
+	    }
+	  else
+	    {
+	    perror("service");
+	    }
 	  // child process finished here
 	  close(afd);
 	  exit(0);
@@ -383,6 +521,7 @@ int server()
   // close
   close(sfd);
   close(logfd);
+  close(logfd2);
   return 0;
 }
 
