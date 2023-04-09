@@ -139,7 +139,7 @@ int get_listener_fd()
   }
 
   /* go through the addrinfo list and try to get a socket descriptor */
-  int sfd;
+  int sfd = -1;
   struct addrinfo *p;
   int yes = 1;
   for (p = servinfo; p != NULL; p = p->ai_next)
@@ -188,20 +188,30 @@ int scanfor(char *buf, char c, size_t limit, size_t *pos)
 {
   int res = 0;
   size_t index = 0;
-
-  for (; *buf != c && index < limit; buf++, index++);
+  char *p = buf;
+  
+  for (index = 0; index < limit; p++, index++)
+    {
+      if (*p == c)
+	{
+	  break;
+	}
+    }
+  
   *pos = index;
   
-  if (*buf == c)
+  //if (*p == c)
+  if (index < limit)
     {
       res =  0;
     }
-
-  if (*pos == limit)
+  else
+    //if (*pos == limit)
     {
       res = 1;
+      p--; // p points outside buffer so is undefined 
     }
-  syslog(LOG_DEBUG, "*buf = %02x, index = %ld, return value = %d", *buf, index, res);
+  syslog(LOG_DEBUG, "*buf = %02x, index = %ld, return value = %d", *p, index, res);
   return res;
 }
 
@@ -231,33 +241,22 @@ int send_all(int fd, int logfd, char *buf, size_t buf_size)
 	  syslog(LOG_DEBUG, "error sending data back");
 	}
     }
+  return 0;
 }
 
 
 int service(int fd, int logfd)
 {
-  //  char *msgbuffer;  // buffer for message store
   char *recvbuf;  // receiving buffer
   char *sendbuf;  // sending buffer
-  char *wptr, *rptr;
-  //  size_t msgbuffer_size = 8192;
   size_t recvbuf_size = 2048;
   size_t sendbuf_size = 2048;
-  size_t nbytes, messagesize, freespace;
+  size_t nbytes;
 
   size_t position;
-  size_t messagecomplete = 0;
   int res;
 
-  // allocate msg buffer
-  /* msgbuffer = malloc(msgbuffer_size); */
-  /* if (msgbuffer == NULL) */
-  /*   { */
-  /*     perror("malloc error 1"); */
-  /*     exit(1); */
-  /*   } */
-  /* syslog(LOG_DEBUG, "msgbuffer pointer = %p", msgbuffer); */
-
+  // allocate recv/send buffer for new connection
   recvbuf = malloc(recvbuf_size);
   if (recvbuf == NULL)
     {
@@ -267,16 +266,12 @@ int service(int fd, int logfd)
   syslog(LOG_DEBUG, "recvbuf pointer = %p", recvbuf);
   
   sendbuf = malloc(sendbuf_size);
-  if (recvbuf == NULL)
+  if (sendbuf == NULL)
     {
       perror("malloc error 3");
       exit(1);
     }
   syslog(LOG_DEBUG, "sendbuf pointer = %p", sendbuf);
-  
-  /* messagesize = 0; */
-  /* wptr = msgbuffer; */
-  /* freespace = msgbuffer_size; */
   
   // the loop of receiving
   while(1)
@@ -463,7 +458,8 @@ int server(int daemon_mode)
       close(STDERR_FILENO);
         
       /* Daemon-specific initialization goes here */
-    }
+    }// daemon_mode
+  
   // open log file 
   int logfd = open("/var/tmp/aesdsocketdata", O_RDWR|O_CREAT, S_IRWXU|S_IRGRP|S_IXGRP|S_IROTH|S_IXOTH);
   if (logfd == -1) 
@@ -480,16 +476,6 @@ int server(int daemon_mode)
     {
       perror("listen error");
     }
-
-
-
-  /* int logfd2 = open("/var/tmp/mylog", O_RDWR|O_CREAT, S_IRWXU|S_IRGRP|S_IXGRP|S_IROTH|S_IXOTH); */
-  /* if (logfd2 == -1)  */
-  /*   { */
-  /*     perror("open error"); */
-  /*     close(sfd); */
-  /*     exit(1); */
-  /*   } */
 
   openlog(NULL, LOG_PID|LOG_PERROR, LOG_USER);
 
@@ -555,7 +541,7 @@ int server(int daemon_mode)
 	    }
 	  else
 	    {
-	    perror("service");
+	      perror("service");
 	    }
 	  // child process finished here
 	  close(afd);
