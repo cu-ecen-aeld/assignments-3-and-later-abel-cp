@@ -30,7 +30,9 @@
 
 
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <sys/socket.h>
+#include <sys/wait.h>
 #include <netdb.h>
 #include <arpa/inet.h> // inet_ntop
 #include <stdio.h>     // printf
@@ -39,7 +41,6 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <unistd.h>
-#include <sys/wait.h>
 #include <syslog.h>
 
 
@@ -233,7 +234,7 @@ int send_all(int fd, int logfd, char *buf, size_t buf_size)
 }
 
 
-int service(int fd, int logfd, int logfd2)
+int service(int fd, int logfd)
 {
   //  char *msgbuffer;  // buffer for message store
   char *recvbuf;  // receiving buffer
@@ -416,18 +417,53 @@ int service(int fd, int logfd, int logfd2)
 }
 
 
-int server()
+int server(int daemon_mode)
 {
   // get a socket for listenning 
   int sfd = get_listener_fd();
+  pid_t pid, sid;
 
-  // listen
-  if (listen(sfd, 10) != 0)
+  // daemonize
+  if (daemon_mode)
     {
-      perror("listen error");
+      pid = fork();
+      if (pid < 0)
+	{ // fail
+	  close(sfd);
+	  exit(EXIT_FAILURE);
+	}
+
+      if (pid > 0)
+	{
+	  // parent process
+	  exit(EXIT_SUCCESS);
+	}
+
+      // change the file mode mask
+      umask(0);
+
+      // create a new SID for the child process
+      sid = setsid();
+      if (sid < 0)
+	{
+	  perror("setsid error");
+	  exit(EXIT_FAILURE);
+	}
+      
+       /* Change the current working directory */
+      if ((chdir("/")) < 0)
+	{
+	/* Log the failure */
+	exit(EXIT_FAILURE);
+	}
+        
+      /* Close out the standard file descriptors */
+      close(STDIN_FILENO);
+      close(STDOUT_FILENO);
+      close(STDERR_FILENO);
+        
+      /* Daemon-specific initialization goes here */
     }
-
-
   // open log file 
   int logfd = open("/var/tmp/aesdsocketdata", O_RDWR|O_CREAT, S_IRWXU|S_IRGRP|S_IXGRP|S_IROTH|S_IXOTH);
   if (logfd == -1) 
@@ -437,13 +473,23 @@ int server()
       exit(1);
     }
 
-  int logfd2 = open("/var/tmp/mylog", O_RDWR|O_CREAT, S_IRWXU|S_IRGRP|S_IXGRP|S_IROTH|S_IXOTH);
-  if (logfd2 == -1) 
+  // create a new sid for the child process
+  
+  // listen
+  if (listen(sfd, 10) != 0)
     {
-      perror("open error");
-      close(sfd);
-      exit(1);
+      perror("listen error");
     }
+
+
+
+  /* int logfd2 = open("/var/tmp/mylog", O_RDWR|O_CREAT, S_IRWXU|S_IRGRP|S_IXGRP|S_IROTH|S_IXOTH); */
+  /* if (logfd2 == -1)  */
+  /*   { */
+  /*     perror("open error"); */
+  /*     close(sfd); */
+  /*     exit(1); */
+  /*   } */
 
   openlog(NULL, LOG_PID|LOG_PERROR, LOG_USER);
 
@@ -457,7 +503,7 @@ int server()
     syslog(LOG_DEBUG, "Caught signal, existing");
     close(sfd);
     close(logfd);
-    close(logfd2);
+    //    close(logfd2);
     closelog();
     unlink("/var/tmp/aesdsocketdata");
     unlink("/var/tmp/mylog");
@@ -487,7 +533,7 @@ int server()
 
 
       // fork a child
-      pid_t pid, sid;
+      //pid_t pid;
       pid = fork();
       if (pid < 0)
 	{ // fail
@@ -500,7 +546,8 @@ int server()
 	  size_t n;
 	  close(sfd); // child does not need to listen
 
-	  n = service(afd, logfd, logfd2);
+	  //n = service(afd, logfd, logfd2);
+	  n = service(afd, logfd);
 	  syslog(LOG_DEBUG, "service returned value = %ld\n", n);
 	  if(n == 0)
 	    {
@@ -521,12 +568,27 @@ int server()
   // close
   close(sfd);
   close(logfd);
-  close(logfd2);
+  //close(logfd2);
+  if (daemon_mode == 1)
+    {
+      exit(EXIT_SUCCESS);
+    }
   return 0;
 }
 
 
-int main()
+int main(int argc, char **argv)
 {
-  return server();
+  int daemon_mode = 0;
+
+  int c;
+  while ((c = getopt (argc, argv, "d")) != -1)
+    {
+      if (c == 'd')
+	{
+	  daemon_mode = 1;
+	  break;
+	}
+    }
+  return server(daemon_mode);
 }
