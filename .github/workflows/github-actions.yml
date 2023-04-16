@@ -6,9 +6,6 @@ on:
         branches:
             - '*'
 jobs:
-            run : git submodule update --init --recursive
-          - name: Run unit test
-            run: ./unit-test.sh
     full-test:
         container: cuaesd/aesd-autotest:assignment5
         runs-on: self-hosted
